@@ -1,0 +1,555 @@
+Load libs and setup
+```{r}
+#installed.packages('ggplot2')
+library('ggplot2')
+library(dplyr)
+library(tidyverse)
+theme_set(theme_bw())
+```
+
+# open and preprocess metadata
+```{r}
+morocco <- read.csv2('./results/morocco.tsv', sep='\t')
+```
+
+
+
+
+# figure 1: clades spread (barplot)
+```{r}
+morocco_clades <- morocco[c('strain','date','Nextstrain_clade')]
+morocco_clades <- morocco_clades[morocco_clades$Nextstrain_clade!='recombinant',]
+table(morocco_clades$Nextstrain_clade)
+morocco_clades$Date <- as.Date(morocco_clades$date, '%Y-%m-%d')
+morocco_clades$month <- format(morocco_clades$Date, "%Y-%m")
+morocco_clades$clade <- morocco_clades$Nextstrain_clade
+
+# select relavant clades
+df <- as.data.frame(table(morocco_clades[c('month','clade')]))
+df_c <- as.data.frame(table(morocco_clades[c('month')]))
+colnames(df_c) <- c('month','N')
+df <- merge(df,df_c)
+df$frequency <- df$Freq/df$N
+df$clade <- as.character(df$clade)
+selected <- df[df$frequency>0.5,]$clade
+df[! df$clade %in% selected,]$clade <- 'Other'
+length(unique(df$clade))
+df <- df[df$frequency>0,]
+df$month <- as.Date(paste(df$month, "-01", sep=""))
+df <- df[df$month>as.Date('2020/01/01'),]
+ggplot(data = df, aes(x = as.Date(month,'%Y-%m') , y=frequency, fill = clade))+
+    geom_bar(position="stack", stat="identity")+
+    scale_fill_brewer(palette="Spectral")+
+  labs(x = 'Date (month)',y='Frequency')
+```
+
+
+
+Compute mutation rate:
+```{r}
+str(morocco)
+Divrg <- morocco[c('divergence','Nextstrain_clade','date')]
+Divrg$Clade <- Divrg$Nextstrain_clad
+Divrg$Clade <- gsub('^(.*Omicron.*)$', 'Omicron', Divrg$Clade)
+Divrg$Clade <- gsub('^(.*Alpha.*)$', 'Alpha', Divrg$Clade)
+Divrg$Clade <- gsub('^(.*Delta.*)$', 'Delta', Divrg$Clade)
+
+Omicron <- Divrg[Divrg$Clade == 'Omicron',]
+median(Omicron$divergence)
+Alpha <- Divrg[Divrg$Clade == 'Alpha',]
+median(Alpha$divergence)
+Delta <- Divrg[Divrg$Clade == 'Delta',]
+median(Delta$divergence)
+
+
+Divrg$Date <- as.Date(Divrg$date, '%Y-%m-%d')
+Divrg$day <- Divrg$Date-as.Date('2020-01-01')
+Divrg <- Divrg[Divrg$day>0,]
+Divrg$x <- Divrg$divergence / as.numeric(Divrg$day)
+
+Omicron <- Divrg[Divrg$Clade == 'Omicron',]
+x <- lm( divergence ~ day, data = Omicron)
+x$coefficients[2]
+1 / x$coefficients[2]
+
+Alpha <- Divrg[Divrg$Clade == 'Alpha',]
+x <- lm( divergence ~ day, data = Alpha)
+x$coefficients[2]
+1 / x$coefficients[2]
+
+Delta <- Divrg[Divrg$Clade == 'Delta',]
+x <- lm( divergence ~ day, data = Delta)
+x$coefficients[2]
+1 / x$coefficients[2]
+```
+
+Heat map
+```{r}
+morocco$muts <- paste0(morocco$substitutions,',',morocco$deletions,',',morocco$insertions)
+morocco_muts <- separate_rows(morocco,muts,sep=",")
+morocco_muts <- morocco_muts[c('muts','strain','Nextstrain_clade')]
+morocco_muts$type = 'Sustitution'
+dels <- morocco_muts[str_detect(morocco_muts$muts, '\\-'),]$muts
+morocco_muts[str_detect(morocco_muts$muts, '\\-'),]$type <- 'Deletion'
+
+inrs <- morocco_muts[str_detect(morocco_muts$muts, '\\:'),]$muts
+morocco_muts[str_detect(morocco_muts$muts, '\\:'),]$type <- 'Insertion'
+
+
+morocco_muts$Variant <- gsub('^(.*Omicron.*)$', 'Omicron', morocco_muts$Nextstrain_clade)
+morocco_muts$Variant <- gsub('^(.*Alpha.*)$', 'Alpha', morocco_muts$Variant)
+morocco_muts$Variant <- gsub('^(.*Delta.*)$', 'Delta', morocco_muts$Variant)
+morocco_muts <- morocco_muts[ morocco_muts$Variant %in% c('Omicron','Alpha','Delta') ,  ] 
+table(morocco_muts$Variant)
+
+annotation <- unique(morocco_muts[c('muts','type')])
+
+Morocco_muts <- morocco_muts[c('Variant','muts')]
+Morocco_muts <- as.data.frame(table(Morocco_muts))
+Morocco_muts <- Morocco_muts[Morocco_muts$muts !='',]
+Morocco_muts <- Morocco_muts[Morocco_muts$Freq>0,]
+
+n_sample_per_clade <- as.data.frame(table(unique(morocco_muts[c('strain','Variant')])[c('Variant')]))
+colnames(n_sample_per_clade) <- c('Variant','N')
+
+Morocco_muts <- merge(Morocco_muts,n_sample_per_clade)
+Morocco_muts$frequency <- Morocco_muts$Freq / Morocco_muts$N
+#ma_mut_matrix <- Morocco_muts[Morocco_muts$frequency> .25, ]
+library(reshape2)
+ma_mut_matrix <- dcast(ma_mut_matrix, Variant~muts, value.var="frequency",fill = 0)
+rownames(ma_mut_matrix) <- ma_mut_matrix[,1]
+ma_mut_matrix<- ma_mut_matrix[,-1]
+ma_mut_Matrix <- as.matrix(ma_mut_matrix)
+
+
+ord <- gsub('[A-Z]','',colnames(ma_mut_Matrix))
+ord <- str_extract(ord, "^[0-9]*")
+ord <- as.numeric(ord)
+sorted_matrix <- ma_mut_Matrix[,order(ord)]
+sorted_matrix <- sorted_matrix[,apply(sorted_matrix, 2, max) > 0.75]
+pheatmap::pheatmap(sorted_matrix,cluster_cols = FALSE, cluster_rows = FALSE)
+
+```
+
+
+# Heat map: Morocco
+
+
+```{r}
+morocco_omicron <- morocco[morocco$Nextstrain_clade %like% '.*Omicron.*',]
+```
+
+```{r}
+library(data.table)
+morocco_omicron <- morocco[morocco$Nextstrain_clade %like% '.*Omicron.*',]
+morocco_omicron_var <- as.data.frame(table(morocco_omicron[c('Nextstrain_clade','Nextclade_pango')]))
+morocco_omicron_var <- morocco_omicron_var[morocco_omicron_var$Freq>0, ]
+#write.csv(morocco_omicron_var, 'morocco_omicron_variant.csv')
+
+morocco_omicron$muts <- paste0(morocco_omicron$substitutions,',',morocco_omicron$deletions,',',morocco_omicron$insertions)
+morocco_omicron_muts <- separate_rows(morocco_omicron,muts,sep=",")
+morocco_omicron_muts <- morocco_omicron_muts[c('muts','strain','Nextstrain_clade')]
+morocco_omicron_muts$type = 'Sustitution'
+dels <- morocco_omicron_muts[str_detect(morocco_omicron_muts$muts, '\\-'),]$muts
+morocco_omicron_muts[str_detect(morocco_omicron_muts$muts, '\\-'),]$type <- 'Deletion'
+
+inrs <- morocco_omicron_muts[str_detect(morocco_omicron_muts$muts, '\\:'),]$muts
+morocco_omicron_muts[str_detect(morocco_omicron_muts$muts, '\\:'),]$type <- 'Insertion'
+
+
+table(morocco_omicron_muts$Nextstrain_clade)
+
+morocco_omicron_muts <- morocco_omicron_muts[c('Nextstrain_clade','muts')]
+morocco_omicron_muts <- as.data.frame(table(morocco_omicron_muts))
+morocco_omicron_muts <- morocco_omicron_muts[morocco_omicron_muts$muts !='',]
+morocco_omicron_muts <- morocco_omicron_muts[morocco_omicron_muts$Freq>0,]
+
+n_sample_per_clade <- as.data.frame(table(unique(morocco_omicron[c('strain','Nextstrain_clade')])[c('Nextstrain_clade')]))
+colnames(n_sample_per_clade) <- c('Nextstrain_clade','N')
+
+morocco_omicron_muts <- merge(morocco_omicron_muts,n_sample_per_clade)
+morocco_omicron_muts$frequency <- morocco_omicron_muts$Freq / morocco_omicron_muts$N
+ma_mut_matrix <- morocco_omicron_muts
+library(reshape2)
+ma_mut_matrix <- dcast(ma_mut_matrix, Nextstrain_clade~muts, value.var="frequency",fill = 0)
+rownames(ma_mut_matrix) <- ma_mut_matrix[,1]
+ma_mut_matrix<- ma_mut_matrix[,-1]
+ma_mut_Matrix <- as.matrix(ma_mut_matrix)
+
+ord <- gsub('[A-Z]','',colnames(ma_mut_Matrix))
+ord <- str_extract(ord, "^[0-9]*")
+ord <- as.numeric(ord)
+sorted_matrix_ma <- ma_mut_Matrix[,order(ord)]
+sorted_matrix_ma <- sorted_matrix_ma[,apply(sorted_matrix_ma, 2, max) > 0.5]
+rownames(sorted_matrix_ma) <- paste0('MA ',rownames(sorted_matrix_ma))
+pheatmap::pheatmap(sorted_matrix_ma,cluster_cols = FALSE, cluster_rows = TRUE)
+
+```
+
+# Heatmap: world
+
+```{r}
+library(data.table)
+getwd()
+world <- read.csv2('./world_OMICRON.csv', sep='\t')
+world <- world[world$country!= 'Morocco',]
+world_omicron <- world[world$Nextstrain_clade %like% '.*Omicron.*',]
+world_omicron_var <- as.data.frame(table(world_omicron[c('Nextstrain_clade','Nextclade_pango')]))
+world_omicron_var <- world_omicron_var[world_omicron_var$Freq>0, ]
+#write.csv(world_omicron_var, 'world_omicron_variant.csv')
+
+world_omicron$muts <- paste0(world_omicron$substitutions,',',world_omicron$deletions,',',world_omicron$insertions)
+world_omicron_muts <- separate_rows(world_omicron,muts,sep=",")
+world_omicron_muts <- world_omicron_muts[c('muts','strain','Nextstrain_clade')]
+world_omicron_muts$type = 'Sustitution'
+dels <- world_omicron_muts[str_detect(world_omicron_muts$muts, '\\-'),]$muts
+world_omicron_muts[str_detect(world_omicron_muts$muts, '\\-'),]$type <- 'Deletion'
+
+inrs <- world_omicron_muts[str_detect(world_omicron_muts$muts, '\\:'),]$muts
+world_omicron_muts[str_detect(world_omicron_muts$muts, '\\:'),]$type <- 'Insertion'
+
+
+table(world_omicron_muts$Nextstrain_clade)
+
+world_omicron_muts <- world_omicron_muts[c('Nextstrain_clade','muts')]
+world_omicron_muts <- as.data.frame(table(world_omicron_muts))
+world_omicron_muts <- world_omicron_muts[world_omicron_muts$muts !='',]
+world_omicron_muts <- world_omicron_muts[world_omicron_muts$Freq>0,]
+
+n_sample_per_clade <- as.data.frame(table(unique(world_omicron[c('strain','Nextstrain_clade')])[c('Nextstrain_clade')]))
+colnames(n_sample_per_clade) <- c('Nextstrain_clade','N')
+
+world_omicron_muts <- merge(world_omicron_muts,n_sample_per_clade)
+world_omicron_muts$frequency <- world_omicron_muts$Freq / world_omicron_muts$N
+ma_mut_matrix <- world_omicron_muts
+library(reshape2)
+ma_mut_matrix <- dcast(ma_mut_matrix, Nextstrain_clade~muts, value.var="frequency",fill = 0)
+rownames(ma_mut_matrix) <- ma_mut_matrix[,1]
+ma_mut_matrix<- ma_mut_matrix[,-1]
+ma_mut_Matrix <- as.matrix(ma_mut_matrix)
+
+
+ord <- gsub('[A-Z]','',colnames(ma_mut_Matrix))
+ord <- str_extract(ord, "^[0-9]*")
+ord <- as.numeric(ord)
+sorted_matrix <- ma_mut_Matrix[,order(ord)]
+sorted_matrix <- sorted_matrix[,apply(sorted_matrix, 2, max) > 0.50]
+sorted_matrix_wrd <- sorted_matrix
+rownames(sorted_matrix_wrd) <- paste0('WR ',rownames(sorted_matrix_wrd))
+pheatmap::pheatmap(sorted_matrix_wrd,cluster_cols = FALSE, cluster_rows = TRUE)
+
+```
+# Heatmap All
+```{r}
+library(gtools)
+mtM <- as.data.frame(sorted_matrix_ma)
+mtW <- as.data.frame(sorted_matrix_wrd)
+
+uM <- colnames(mtM)[ !colnames(mtM) %in% colnames(sorted_matrix_wrd) ]
+uW <- colnames(sorted_matrix_wrd)[ !colnames(sorted_matrix_wrd) %in% colnames(mtM) ]
+
+mtM[uW] <- NA
+mtW[uM] <- NA
+
+matrix_heatmap <- rbind(mtM , mtW)
+matrix_heatmap[is.na(matrix_heatmap)] <- 0
+
+
+
+ord <- gsub('[A-Z]','',colnames(matrix_heatmap))
+ord <- str_extract(ord, "^[0-9]*")
+ord <- as.numeric(ord)
+sorted_matrix <- matrix_heatmap[,order(ord)]
+sorted_matrix <- sorted_matrix[,apply(sorted_matrix, 2, max) > 0.75]
+matrix_heatmap <- sorted_matrix
+library(gplots)
+library(circlize)
+col_fun = colorRamp2(c(-2, 0, 2), c("green", "white", "red"))
+col_fun(seq(-3, 3))
+
+pheatmap::pheatmap(matrix_heatmap,cluster_cols = FALSE, cluster_rows = TRUE, main="Heatmap",
+                   fontsize_row=6,fontsize_col=5, 
+                #  color = rev(RColorBrewer::brewer.pal(n = 255, name = "Spectral")),
+                #color = colorRampPalette(c("lightskyblue",'darkseagreen1', "white", 'gold', "orangered"))(50),
+border_color="white",
+treeheight_row=20,
+#cellwidth = 20, cellheight = 3,   # changed to 3
+                   )
+
+var_heatmap <- matrix_heatmap[rownames(matrix_heatmap) %like% ".*(21K)|(21L)|(22B)|(22E).*",]
+
+var_heatmap <- var_heatmap[,apply(var_heatmap, 2, max) > 0.5]
+
+pheatmap::pheatmap(var_heatmap,cluster_cols = FALSE, cluster_rows = TRUE, main="Heatmap", fontsize_row=9,fontsize_col=8, border_color="white", treeheight_row=5,  cellwidth = 9, cellheight = 15, )
+```
+
+# Boxplot
+```{r}
+morocco_omicron
+ggplot(morocco_omicron, aes(Nextstrain_clade, divergence, fill = Nextstrain_clade))+
+  geom_jitter(size=.3, shape=21, aes( color = Nextstrain_clade))+
+  geom_boxplot()+ labs(x='Omicron Variant', 'Divergence (Number of mutation)')
+```
+
+
+# Boxplot
+```{r}
+morocco_omicron$Country <- 'Morocco'
+world_omicron$Country <- 'World'
+
+omicrons <- rbind(world_omicron[c('strain','Country','Nextstrain_clade','divergence')],morocco_omicron[c('strain','Country','Nextstrain_clade','divergence')])
+
+omicrons <- omicrons[omicrons$Nextstrain_clade %like% ".*(21K)|(21L)|(22B)|(22E).*",]
+
+
+ggplot(omicrons, aes(Country, divergence, fill = Country))+
+  facet_wrap(.~Nextstrain_clade, ncol=2)+
+  geom_jitter(size=.3, shape=21, aes( color = Country))+
+  geom_boxplot()+ labs(x='Omicron Variant', 'Divergence (Number of mutation)')
+
+
+```
+
+
+# Notable differences
+```{r}
+M <- reshape2::melt(as.matrix(matrix_heatmap))
+N <- t(as.data.frame(strsplit(as.character(M$Var1),' ', fixed = TRUE))[2,])
+colnames(N) <- 'Clade'
+M$clade <- N[,1]
+O <- t(as.data.frame(strsplit(as.character(M$Var1),' ', fixed = TRUE))[1,])
+colnames(O) <- 'Origin'
+M$origin <- O[,1]
+M$Var <- paste0(M$Var2, '_', M$clade)
+M <- M[M$clade %in% c('21K','21L','22B','22E'),]
+
+D <- dcast(M, Var~origin)
+D$diff <- D$MA - D$WR
+
+#write_csv(D, 'diff_mutation_omicron.csv')
+
+write_csv(D, 'diff_mutation_omicron_selected.csv')
+
+```
+# Venn Diagram 
+```{r}
+ma_mt <- melt(sorted_matrix_ma)
+ma_mt <- ma_mt[ma_mt$value> 0.25, ]
+colnames(ma_mt) <- c('Variant','Mutation','value')
+
+unique(ma_mt$Variant)
+
+ma_mtF <- as.data.frame(table(ma_mt))
+ma_mtD <- dcast(ma_mtF, Variant~Mutation, value.var="Freq",fill = 0)
+
+
+
+
+omicron_21K <- ma_mt[ma_mt$Variant == 'MA 21K (Omicron)',]$Mutation
+omicron_21L <- ma_mt[ma_mt$Variant == 'MA 21L (Omicron)',]$Mutation
+omicron_22A <- ma_mt[ma_mt$Variant == 'MA 22A (Omicron)',]$Mutation
+omicron_22B <- ma_mt[ma_mt$Variant == 'MA 22B (Omicron)',]$Mutation
+omicron_22C <- ma_mt[ma_mt$Variant == 'MA 22C (Omicron)',]$Mutation
+omicron_22D <- ma_mt[ma_mt$Variant == 'MA 22D (Omicron)',]$Mutation
+omicron_22E <- ma_mt[ma_mt$Variant == 'MA 22E (Omicron)',]$Mutation
+omicron_22F <- ma_mt[ma_mt$Variant == 'MA 22F (Omicron)',]$Mutation
+
+library("ggvenn")
+library("gplots")
+
+D <-list('omicron_21K'=omicron_21K,'omicron_21L'=omicron_21L, 'omicron_22C'=omicron_22A,'omicron_22B'=omicron_22B, 'omicron_22E'=omicron_22E)
+
+venn(D)
+
+```
+
+
+
+
+# Venn Diagram per var
+```{r}
+mt <- reshape2::melt(as.matrix(matrix_heatmap))
+mt <- mt[mt$value> 0.05, ]
+colnames(mt) <- c('Variant','Mutation','value')
+
+unique(ma_mt$Variant)
+
+ma_mtF <- as.data.frame(table(ma_mt))
+ma_mtD <- dcast(ma_mtF, Variant~Mutation, value.var="Freq",fill = 0)
+
+
+
+mt$Mutation <- as.character(mt$Mutation)
+ma_omicron_21K <- mt[mt$Variant == 'MA 21K (Omicron)',]$Mutation
+ma_omicron_21L <- mt[mt$Variant == 'MA 21L (Omicron)',]$Mutation
+ma_omicron_22A <- mt[mt$Variant == 'MA 22A (Omicron)',]$Mutation
+ma_omicron_22B <- mt[mt$Variant == 'MA 22B (Omicron)',]$Mutation
+ma_omicron_22C <- mt[mt$Variant == 'MA 22C (Omicron)',]$Mutation
+ma_omicron_22D <- mt[mt$Variant == 'MA 22D (Omicron)',]$Mutation
+ma_omicron_22E <- mt[mt$Variant == 'MA 22E (Omicron)',]$Mutation
+ma_omicron_22F <- mt[mt$Variant == 'MA 22F (Omicron)',]$Mutation
+
+wr_omicron_21K <- mt[mt$Variant == 'WR 21K (Omicron)',]$Mutation
+wr_omicron_21L <- mt[mt$Variant == 'WR 21L (Omicron)',]$Mutation
+wr_omicron_22A <- mt[mt$Variant == 'WR 22A (Omicron)',]$Mutation
+wr_omicron_22B <- mt[mt$Variant == 'WR 22B (Omicron)',]$Mutation
+wr_omicron_22C <- mt[mt$Variant == 'WR 22C (Omicron)',]$Mutation
+wr_omicron_22D <- mt[mt$Variant == 'WR 22D (Omicron)',]$Mutation
+wr_omicron_22E <- mt[mt$Variant == 'WR 22E (Omicron)',]$Mutation
+wr_omicron_22F <- mt[mt$Variant == 'WR 22F (Omicron)',]$Mutation
+
+library("ggvenn")
+library("gplots")
+
+D <-list('ma_omicron_21K'=ma_omicron_21K,'wr_omicron_21K'=wr_omicron_21K)
+venn(D)
+
+D <-list('ma_omicron_21L'=ma_omicron_21L,'ma_omicron_21L'=ma_omicron_21L)
+venn(D)
+
+D <-list('ma_omicron_22A'=ma_omicron_22A,'wr_omicron_22A'=wr_omicron_22A)
+venn(D)
+
+D <-list('ma_omicron_22B'=ma_omicron_22B,'wr_omicron_22B'=wr_omicron_22B)
+venn(D)
+
+D <-list('ma_omicron_22C'=ma_omicron_22C,'wr_omicron_22C'=wr_omicron_22C)
+venn(D)
+
+D <-list('ma_omicron_22D'=ma_omicron_22D,'wr_omicron_22D'=ma_omicron_22D)
+venn(D)
+
+D <-list('ma_omicron_22E'=ma_omicron_22E,'wr_omicron_22E'=wr_omicron_22E)
+venn(D)
+
+D <-list('ma_omicron_22F'=ma_omicron_22F,'wr_omicron_22F'=wr_omicron_22F)
+venn(D)
+
+```
+# Venn diagram lineages
+```{r}
+LinW <- unique(world_omicron$pango_lineage)
+LinM <- unique(morocco_omicron $pango_lineage)
+
+length(LinW[LinW %in% LinM])
+length(LinM[! LinM %in% LinW])
+
+D <-list('Morocco'=LinM, 'World'=LinW )
+
+
+
+# Prepare a palette of 3 colors with R colorbrewer:
+library(RColorBrewer)
+myCol <- brewer.pal(2, "Pastel2")
+
+# Chart
+venn.diagram(
+        x = D,
+        category.names = c("Morocco" , "World"),
+        filename = '#14_venn_diagramm.png',
+        output=TRUE,
+        
+        # Output features
+        imagetype="png" ,
+        height = 480 , 
+        width = 480 , 
+        resolution = 300,
+        compression = "lzw",
+        
+        # Circles
+        lwd = 2,
+        lty = 'blank',
+        fill = c("#B3E2CD","#FDCDAC" ),
+        cex = .6, fontface = "bold", fontfamily = "sans",cat.cex = 0.6, 
+        cat.fontface = "bold", cat.default.pos = "outer", 
+        cat.pos = c(-10, -10), cat.dist = c(-0.055, -0.055), 
+        #cat.fontfamily = "sans", rotation = 1
+)
+```
+
+
+# Venn diagram mutations
+```{r}
+
+wm <- world_omicron_muts[world_omicron_muts$Freq>1,]
+mm <- morocco_omicron_muts[morocco_omicron_muts$Freq>1,]
+MUT_W <- unique(as.character(wm$muts))
+MUT_M <- unique(as.character(mm $muts))
+
+length(MUT_W[MUT_W %in% MUT_W])
+length(MUT_M[! MUT_M %in% MUT_W])
+
+D <-list('Morocco'=MUT_M, 'World'=MUT_W )
+
+
+
+# Prepare a palette of 3 colors with R colorbrewer:
+library(RColorBrewer)
+myCol <- brewer.pal(2, "Pastel2")
+
+# Chart
+venn.diagram(
+        x = D,
+        category.names = c("Morocco" , "World"),
+        filename = '#MUT_venn_diagramm.png',
+        output=TRUE,
+        
+        # Output features
+        imagetype="png" ,
+        height = 480 , 
+        width = 480 , 
+        resolution = 300,
+        compression = "lzw",
+        
+        # Circles
+        lwd = 2,
+        lty = 'blank',
+        fill = c("#B3E2CD","#FDCDAC" ),
+        cex = .6, fontface = "bold", fontfamily = "sans",cat.cex = 0.6, 
+        cat.fontface = "bold", cat.default.pos = "outer", 
+        cat.pos = c(-10, -10), cat.dist = c(-0.055, -0.055), 
+        #cat.fontfamily = "sans", rotation = 1
+)
+
+exlsv <- MUT_M[! MUT_M %in% MUT_W]
+pos <- gsub('[A-Z]','',exlsv)
+pos_s <- as.numeric(pos)
+Del <- exlsv[is.na(pos_s)]
+
+Ss <- pos_s[between(pos_s,21558,25372)]
+Ss <- Ss[!is.na(Ss)]
+
+```
+
+
+
+```{r}
+morocco$muts <- paste0(morocco$substitutions,',',morocco$deletions,',',morocco$insertions)
+morocco_muts <- separate_rows(morocco,muts,sep=",")
+morocco_muts <- morocco_muts[c('muts','strain','Nextclade_pango','Nextstrain_clade')]
+
+morocco_muts$type = 'Sustitution'
+dels <- morocco_muts[str_detect(morocco_muts$muts, '\\-'),]$muts
+morocco_muts[str_detect(morocco_muts$muts, '\\-'),]$type <- 'Deletion'
+
+inrs <- morocco_muts[str_detect(morocco_muts$muts, '\\:'),]$muts
+morocco_muts[str_detect(morocco_muts$muts, '\\:'),]$type <- 'Insertion'
+```
+
+# RBD
+```{r}
+rbd <- read.csv('rbd.csv')
+library(ggplot2)
+ggplot2::ggplot(data= rbd, aes(x=Clade,y=mut_escape,fill=Mutation))+
+ geom_bar(position="stack", stat="identity")+
+  theme_bw() + labs(y='Clade',y='Mutational escape')
+  #scale_fill_brewer(palette="Spectral")
+
+
+ggplot2::ggplot(data= N, aes(y=reorder(Mutation, mut_escape),x=mut_escape,fill=reorder(Mutation, mut_escape)))+
+ geom_bar(position="stack", stat="identity")+
+  theme_bw() + labs(y='Mutation',x='Mutational escape')
+  #scale_fill_brewer(palette="Spectral")
+```
+
+
