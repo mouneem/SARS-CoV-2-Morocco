@@ -119,4 +119,25 @@ clades.Mat <- acast(clades.prop, City ~ clade, value.var = 'Freq')
 
 library(pheatmap)
 pheatmap(clades.Mat, cluster_rows = TRUE)
-shape2)
+
+
+##############
+CC <- read.csv2('./results/country_clade.csv',sep = ',',header = FALSE)
+library(reshape2)
+muta <- melt(CC, id = 'V1')
+mut <- muta[c(1,3)]
+m <- unique(m)
+m <- m[m$value!='',]
+
+muts_ma <- mut[mut$V1 == 'Morocco',]
+muts_ma_u <- unique(muts_ma)
+muts_world <- mut[mut$V1 != 'Morocco',]
+muts_world_u <- unique(muts_world)
+
+specific_muts_ma <- muts_ma_u[! muts_ma_u$value %in% muts_world_u$value, ]
+
+ma_cnt <- muta[muta$value %in% specific_muts_ma$value, ]
+ma_cnt <- as.data.frame(table(ma_cnt))
+ma_cnt <- ma_cnt[ma_cnt$Freq > 0 , ]
+
+write.csv(ma_cnt, './results/unique_mutations.csv')

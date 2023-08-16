@@ -7,9 +7,10 @@ library(tidyverse)
 theme_set(theme_bw())
 ```
 
-# open and preprocess metadata
+# open and preprocess metadata`
 ```{r}
-morocco <- read.csv2('./results/morocco.tsv', sep='\t')
+morocco <- read.csv2('./results/world.tsv', sep='\t')
+morocco <- morocco[morocco$country == 'Morocco',]
 ```
 
 
@@ -37,10 +38,13 @@ length(unique(df$clade))
 df <- df[df$frequency>0,]
 df$month <- as.Date(paste(df$month, "-01", sep=""))
 df <- df[df$month>as.Date('2020/01/01'),]
-ggplot(data = df, aes(x = as.Date(month,'%Y-%m') , y=frequency, fill = clade))+
+img <- ggplot(data = df, aes(x = as.Date(month,'%Y-%m') , y=frequency, fill = clade))+
     geom_bar(position="stack", stat="identity")+
     scale_fill_brewer(palette="Spectral")+
   labs(x = 'Date (month)',y='Frequency')
+img
+
+ggsave(file="figure_1.svg", plot=img, width=10, height=6)
 ```
 
 
@@ -48,6 +52,24 @@ ggplot(data = df, aes(x = as.Date(month,'%Y-%m') , y=frequency, fill = clade))+
 Compute mutation rate:
 ```{r}
 str(morocco)
+
+morocco[,'Nextstrain_clade'] <- gsub("21K", "Omicron 21K ", morocco[,'Nextstrain_clade'])
+morocco[,'Nextstrain_clade'] <- gsub("21L", "Omicron 21L ", morocco[,'Nextstrain_clade'])
+morocco[,'Nextstrain_clade'] <- gsub("21M", "Omicron 21M ", morocco[,'Nextstrain_clade'])
+morocco[,'Nextstrain_clade'] <- gsub("22A", "Omicron 22A ", morocco[,'Nextstrain_clade'])
+morocco[,'Nextstrain_clade'] <- gsub("22B", "Omicron 22B ", morocco[,'Nextstrain_clade'])
+morocco[,'Nextstrain_clade'] <- gsub("22C", "Omicron 22C ", morocco[,'Nextstrain_clade'])
+morocco[,'Nextstrain_clade'] <- gsub("22D", "Omicron 22D ", morocco[,'Nextstrain_clade'])
+morocco[,'Nextstrain_clade'] <- gsub("22E", "Omicron 22E ", morocco[,'Nextstrain_clade'])
+morocco[,'Nextstrain_clade'] <- gsub("22F", "Omicron 22F ", morocco[,'Nextstrain_clade'])
+morocco[,'Nextstrain_clade'] <- gsub("22G", "Omicron 22G ", morocco[,'Nextstrain_clade'])
+
+morocco[,'Nextstrain_clade'] <- gsub("20I", "Alpha 20I ", morocco[,'Nextstrain_clade'])
+
+morocco[,'Nextstrain_clade'] <- gsub("21A", "Delta 21A ", morocco[,'Nextstrain_clade'])
+morocco[,'Nextstrain_clade'] <- gsub("21I", "Delta 21I ", morocco[,'Nextstrain_clade'])
+morocco[,'Nextstrain_clade'] <- gsub("21J", "Delta 21J ", morocco[,'Nextstrain_clade'])
+
 Divrg <- morocco[c('divergence','Nextstrain_clade','date')]
 Divrg$Clade <- Divrg$Nextstrain_clad
 Divrg$Clade <- gsub('^(.*Omicron.*)$', 'Omicron', Divrg$Clade)
@@ -540,16 +562,30 @@ morocco_muts[str_detect(morocco_muts$muts, '\\:'),]$type <- 'Insertion'
 ```{r}
 rbd <- read.csv('rbd.csv')
 library(ggplot2)
-ggplot2::ggplot(data= rbd, aes(x=Clade,y=mut_escape,fill=Mutation))+
+img <- ggplot2::ggplot(data= rbd, aes(x=Clade,y=mut_escape,fill=Mutation))+
  geom_bar(position="stack", stat="identity")+
   theme_bw() + labs(y='Clade',y='Mutational escape')
   #scale_fill_brewer(palette="Spectral")
+img
 
+#This actually save the plot in a image
+ggsave(file="fig6b.svg", plot=img, width=8, height=5)
 
-ggplot2::ggplot(data= N, aes(y=reorder(Mutation, mut_escape),x=mut_escape,fill=reorder(Mutation, mut_escape)))+
+ggplot2::ggplot(data= rbd, aes(y=reorder(Mutation, mut_escape),x=mut_escape,fill=reorder(Mutation, mut_escape)))+
  geom_bar(position="stack", stat="identity")+
   theme_bw() + labs(y='Mutation',x='Mutational escape')
   #scale_fill_brewer(palette="Spectral")
+
+rbd2 <- rbd[! is.na(rbd$mut_escape), ]
+
+f6a <- ggplot2::ggplot(data= rbd2, aes(y= Mutation ,x=mut_escape,fill=Mutation ))+
+ geom_bar(position="stack", stat="identity")+
+  theme_bw() + labs(y='Mutation',x='Mutational escape')
+  #scale_fill_brewer(palette="Spectral")
+
+f6a
+#This actually save the plot in a image
+ggsave(file="fig6-a.svg", plot=f6a, width=8, height=6)
 ```
 
 
