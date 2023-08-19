@@ -87,7 +87,7 @@ median(Delta$divergence)
 Divrg$Date <- as.Date(Divrg$date, '%Y-%m-%d')
 Divrg$day <- Divrg$Date-as.Date('2020-01-01')
 Divrg <- Divrg[Divrg$day>0,]
-Divrg$x <- Divrg$divergence / as.numeric(Divrg$day)
+Divrg$x <- as.numeric(Divrg$divergence) / as.numeric(Divrg$day)
 
 Omicron <- Divrg[Divrg$Clade == 'Omicron',]
 x <- lm( divergence ~ day, data = Omicron)
@@ -136,7 +136,7 @@ colnames(n_sample_per_clade) <- c('Variant','N')
 
 Morocco_muts <- merge(Morocco_muts,n_sample_per_clade)
 Morocco_muts$frequency <- Morocco_muts$Freq / Morocco_muts$N
-#ma_mut_matrix <- Morocco_muts[Morocco_muts$frequency> .25, ]
+ma_mut_matrix <- Morocco_muts[Morocco_muts$frequency> .25, ]
 library(reshape2)
 ma_mut_matrix <- dcast(ma_mut_matrix, Variant~muts, value.var="frequency",fill = 0)
 rownames(ma_mut_matrix) <- ma_mut_matrix[,1]
@@ -151,6 +151,9 @@ sorted_matrix <- ma_mut_Matrix[,order(ord)]
 sorted_matrix <- sorted_matrix[,apply(sorted_matrix, 2, max) > 0.75]
 pheatmap::pheatmap(sorted_matrix,cluster_cols = FALSE, cluster_rows = FALSE)
 
+
+ggsave(file="figure_5_2.eps", plot=img, width=15, height=8)
+
 ```
 
 
@@ -158,7 +161,10 @@ pheatmap::pheatmap(sorted_matrix,cluster_cols = FALSE, cluster_rows = FALSE)
 
 
 ```{r}
+library(dplyr)
 morocco_omicron <- morocco[morocco$Nextstrain_clade %like% '.*Omicron.*',]
+morocco_omicron <- subset(morocco, grepl("Omicron", Nextstrain_clade, ignore.case = TRUE))
+
 ```
 
 ```{r}
@@ -204,8 +210,17 @@ ord <- as.numeric(ord)
 sorted_matrix_ma <- ma_mut_Matrix[,order(ord)]
 sorted_matrix_ma <- sorted_matrix_ma[,apply(sorted_matrix_ma, 2, max) > 0.5]
 rownames(sorted_matrix_ma) <- paste0('MA ',rownames(sorted_matrix_ma))
-pheatmap::pheatmap(sorted_matrix_ma,cluster_cols = FALSE, cluster_rows = TRUE)
-
+p <- pheatmap::pheatmap(sorted_matrix_ma,cluster_cols = FALSE, cluster_rows = TRUE)
+p
+save_pheatmap_pdf <- function(x, filename, width=15, height=5) {
+   stopifnot(!missing(x))
+   stopifnot(!missing(filename))
+   pdf(filename, width=width, height=height)
+   grid::grid.newpage()
+   grid::grid.draw(x$gtable)
+   dev.off()
+}
+save_pheatmap_pdf(p, "sorted_matrix_ma.eps", width=30, height=3)
 ```
 
 # Heatmap: world
@@ -213,9 +228,12 @@ pheatmap::pheatmap(sorted_matrix_ma,cluster_cols = FALSE, cluster_rows = TRUE)
 ```{r}
 library(data.table)
 getwd()
-world <- read.csv2('./world_OMICRON.csv', sep='\t')
+world <- read.csv2('./results/world.tsv', sep='\t')
+#world <- read.csv2('./world_OMICRON.csv', sep='\t')
 world <- world[world$country!= 'Morocco',]
 world_omicron <- world[world$Nextstrain_clade %like% '.*Omicron.*',]
+
+world_omicron <- world[world$Nextstrain_clade %in% c('21L','21K','22A','22B','22C','22D','22E','22F' ), ]
 world_omicron_var <- as.data.frame(table(world_omicron[c('Nextstrain_clade','Nextclade_pango')]))
 world_omicron_var <- world_omicron_var[world_omicron_var$Freq>0, ]
 #write.csv(world_omicron_var, 'world_omicron_variant.csv')
@@ -302,15 +320,26 @@ var_heatmap <- matrix_heatmap[rownames(matrix_heatmap) %like% ".*(21K)|(21L)|(22
 
 var_heatmap <- var_heatmap[,apply(var_heatmap, 2, max) > 0.5]
 
-pheatmap::pheatmap(var_heatmap,cluster_cols = FALSE, cluster_rows = TRUE, main="Heatmap", fontsize_row=9,fontsize_col=8, border_color="white", treeheight_row=5,  cellwidth = 9, cellheight = 15, )
+p <- pheatmap::pheatmap(var_heatmap,cluster_cols = FALSE, cluster_rows = TRUE, main="Heatmap", fontsize_row=9,fontsize_col=8, border_color="white", treeheight_row=5,  cellwidth = 9, cellheight = 15, )
+
+save_pheatmap_pdf(p, "sorted_matrix_ma_wrl.eps", width=30, height=3)
+
 ```
 
 # Boxplot
 ```{r}
-morocco_omicron
-ggplot(morocco_omicron, aes(Nextstrain_clade, divergence, fill = Nextstrain_clade))+
-  geom_jitter(size=.3, shape=21, aes( color = Nextstrain_clade))+
+morocco_omicron$Nextstrain_clade
+
+
+# Calculate the first and third quartiles
+morocco_omicron <- morocco_omicron[morocco_omicron$divergence <150,]
+
+m <- ggplot(morocco_omicron, aes(x = Nextstrain_clade, as.numeric(divergence), fill = Nextstrain_clade))+
+  geom_jitter(size=.3, shape=21, aes( color = Nextstrain_clade))+   
   geom_boxplot()+ labs(x='Omicron Variant', 'Divergence (Number of mutation)')
+m
+ggsave(file="boxplot_omicron ma.svg", plot=m, width=12, height=5)
+
 ```
 
 
@@ -320,6 +349,7 @@ morocco_omicron$Country <- 'Morocco'
 world_omicron$Country <- 'World'
 
 omicrons <- rbind(world_omicron[c('strain','Country','Nextstrain_clade','divergence')],morocco_omicron[c('strain','Country','Nextstrain_clade','divergence')])
+omicrons$divergence <- as.numeric(omicrons$divergence)
 
 omicrons <- omicrons[omicrons$Nextstrain_clade %like% ".*(21K)|(21L)|(22B)|(22E).*",]
 
@@ -364,24 +394,24 @@ unique(ma_mt$Variant)
 ma_mtF <- as.data.frame(table(ma_mt))
 ma_mtD <- dcast(ma_mtF, Variant~Mutation, value.var="Freq",fill = 0)
 
+omicron_21K <- ma_mt[ma_mt$Variant == 'MA Omicron 21K ',]$Mutation
+omicron_21L <- ma_mt[ma_mt$Variant == 'MA Omicron 21L ',]$Mutation
+omicron_22A <- ma_mt[ma_mt$Variant == 'MA Omicron 22A ',]$Mutation
+omicron_22B <- ma_mt[ma_mt$Variant == 'MA Omicron 22B ',]$Mutation
+omicron_22C <- ma_mt[ma_mt$Variant == 'MA Omicron 22C ',]$Mutation
+omicron_22D <- ma_mt[ma_mt$Variant == 'MA Omicron 22D ',]$Mutation
+omicron_22E <- ma_mt[ma_mt$Variant == 'MA Omicron 22E ',]$Mutation
+omicron_22F <- ma_mt[ma_mt$Variant == 'MA Omicron 22F ',]$Mutation
 
-
-
-omicron_21K <- ma_mt[ma_mt$Variant == 'MA 21K (Omicron)',]$Mutation
-omicron_21L <- ma_mt[ma_mt$Variant == 'MA 21L (Omicron)',]$Mutation
-omicron_22A <- ma_mt[ma_mt$Variant == 'MA 22A (Omicron)',]$Mutation
-omicron_22B <- ma_mt[ma_mt$Variant == 'MA 22B (Omicron)',]$Mutation
-omicron_22C <- ma_mt[ma_mt$Variant == 'MA 22C (Omicron)',]$Mutation
-omicron_22D <- ma_mt[ma_mt$Variant == 'MA 22D (Omicron)',]$Mutation
-omicron_22E <- ma_mt[ma_mt$Variant == 'MA 22E (Omicron)',]$Mutation
-omicron_22F <- ma_mt[ma_mt$Variant == 'MA 22F (Omicron)',]$Mutation
-
-library("ggvenn")
-library("gplots")
 
 D <-list('omicron_21K'=omicron_21K,'omicron_21L'=omicron_21L, 'omicron_22C'=omicron_22A,'omicron_22B'=omicron_22B, 'omicron_22E'=omicron_22E)
 
-venn(D)
+library(VennDiagram)
+vn <- venn.diagram(D, filename = NULL)
+vn 
+grid::grid.draw(vn)
+
+ggsave(vn, file="ven.svg", device = "svg")
 
 ```
 
@@ -402,23 +432,24 @@ ma_mtD <- dcast(ma_mtF, Variant~Mutation, value.var="Freq",fill = 0)
 
 
 mt$Mutation <- as.character(mt$Mutation)
-ma_omicron_21K <- mt[mt$Variant == 'MA 21K (Omicron)',]$Mutation
-ma_omicron_21L <- mt[mt$Variant == 'MA 21L (Omicron)',]$Mutation
-ma_omicron_22A <- mt[mt$Variant == 'MA 22A (Omicron)',]$Mutation
-ma_omicron_22B <- mt[mt$Variant == 'MA 22B (Omicron)',]$Mutation
-ma_omicron_22C <- mt[mt$Variant == 'MA 22C (Omicron)',]$Mutation
-ma_omicron_22D <- mt[mt$Variant == 'MA 22D (Omicron)',]$Mutation
-ma_omicron_22E <- mt[mt$Variant == 'MA 22E (Omicron)',]$Mutation
-ma_omicron_22F <- mt[mt$Variant == 'MA 22F (Omicron)',]$Mutation
 
-wr_omicron_21K <- mt[mt$Variant == 'WR 21K (Omicron)',]$Mutation
-wr_omicron_21L <- mt[mt$Variant == 'WR 21L (Omicron)',]$Mutation
-wr_omicron_22A <- mt[mt$Variant == 'WR 22A (Omicron)',]$Mutation
-wr_omicron_22B <- mt[mt$Variant == 'WR 22B (Omicron)',]$Mutation
-wr_omicron_22C <- mt[mt$Variant == 'WR 22C (Omicron)',]$Mutation
-wr_omicron_22D <- mt[mt$Variant == 'WR 22D (Omicron)',]$Mutation
-wr_omicron_22E <- mt[mt$Variant == 'WR 22E (Omicron)',]$Mutation
-wr_omicron_22F <- mt[mt$Variant == 'WR 22F (Omicron)',]$Mutation
+ma_omicron_21K <- mt[mt$Variant == 'MA Omicron 21K ',]$Mutation
+ma_omicron_21L <- mt[mt$Variant == 'MA Omicron 21L ',]$Mutation
+ma_omicron_22A <- mt[mt$Variant == 'MA Omicron 22A ',]$Mutation
+ma_omicron_22B <- mt[mt$Variant == 'MA Omicron 22B ',]$Mutation
+ma_omicron_22C <- mt[mt$Variant == 'MA Omicron 22C ',]$Mutation
+ma_omicron_22D <- mt[mt$Variant == 'MA Omicron 22D ',]$Mutation
+ma_omicron_22E <- mt[mt$Variant == 'MA Omicron 22E ',]$Mutation
+ma_omicron_22F <- mt[mt$Variant == 'MA Omicron 22F ',]$Mutation
+
+wr_omicron_21K <- mt[mt$Variant == 'WR Omicron 21K ',]$Mutation
+wr_omicron_21L <- mt[mt$Variant == 'WR Omicron 21L ',]$Mutation
+wr_omicron_22A <- mt[mt$Variant == 'WR Omicron 22A ',]$Mutation
+wr_omicron_22B <- mt[mt$Variant == 'WR Omicron 22B ',]$Mutation
+wr_omicron_22C <- mt[mt$Variant == 'WR Omicron 22C ',]$Mutation
+wr_omicron_22D <- mt[mt$Variant == 'WR Omicron 22D ',]$Mutation
+wr_omicron_22E <- mt[mt$Variant == 'WR Omicron 22E ',]$Mutation
+wr_omicron_22F <- mt[mt$Variant == 'WR Omicron 22F ',]$Mutation
 
 library("ggvenn")
 library("gplots")
@@ -462,13 +493,13 @@ D <-list('Morocco'=LinM, 'World'=LinW )
 
 # Prepare a palette of 3 colors with R colorbrewer:
 library(RColorBrewer)
-myCol <- brewer.pal(2, "Pastel2")
+#myCol <- brewer.pal(2, "Pastel2")
 
 # Chart
 venn.diagram(
         x = D,
         category.names = c("Morocco" , "World"),
-        filename = '#14_venn_diagramm.png',
+        filename = '_venn_diagramm.png',
         output=TRUE,
         
         # Output features
@@ -507,7 +538,7 @@ D <-list('Morocco'=MUT_M, 'World'=MUT_W )
 
 # Prepare a palette of 3 colors with R colorbrewer:
 library(RColorBrewer)
-myCol <- brewer.pal(2, "Pastel2")
+#myCol <- brewer.pal(2, "Pastel2")
 
 # Chart
 venn.diagram(
